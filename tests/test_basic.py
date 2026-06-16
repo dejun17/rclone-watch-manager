@@ -19,7 +19,7 @@ class BasicTests(unittest.TestCase):
     def test_app_metadata(self):
         self.assertEqual(rwm.APP_NAME, "rclone-watch-manager")
         self.assertEqual(rwm.APP_DISPLAY_NAME, "Rclone Watch Manager")
-        self.assertEqual(rwm.APP_VERSION, "1.0.1")
+        self.assertEqual(rwm.APP_VERSION, "1.4.0")
 
     def test_safe_extract_tar_exists(self):
         self.assertTrue(hasattr(rwm, "safe_extract_tar"))
