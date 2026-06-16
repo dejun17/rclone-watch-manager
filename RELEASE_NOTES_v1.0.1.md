@@ -19,3 +19,6 @@ This release polishes the initial public GitHub package and adds basic CLI and v
 - Replace `YOUR_USERNAME` in README badge URLs
 - Add screenshots later when available
 - Create GitHub release `v1.0.1`
+
+
+GitHub repository owner: dejun17
