@@ -1,6 +1,6 @@
 # Rclone Watch Manager
 
-[![Python Check](https://github.com/YOUR_USERNAME/rclone-watch-manager/actions/workflows/python-check.yml/badge.svg)](https://github.com/YOUR_USERNAME/rclone-watch-manager/actions/workflows/python-check.yml)
+[![Python Check](https://github.com/dejun17/rclone-watch-manager/actions/workflows/python-check.yml/badge.svg)](https://github.com/YOUR_USERNAME/rclone-watch-manager/actions/workflows/python-check.yml)
 [![Python](https://img.shields.io/badge/Python-3.9%2B-blue.svg)]()
 [![Docker](https://img.shields.io/badge/Docker-required-blue.svg)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)]()
