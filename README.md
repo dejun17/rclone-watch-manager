@@ -1,9 +1,11 @@
 # Rclone Watch Manager
 
 [![Python Check](https://github.com/dejun17/rclone-watch-manager/actions/workflows/python-check.yml/badge.svg)](https://github.com/dejun17/rclone-watch-manager/actions/workflows/python-check.yml)
-[![Python](https://img.shields.io/badge/Python-3.9%2B-blue.svg)]()
-[![Docker](https://img.shields.io/badge/Docker-required-blue.svg)]()
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)]()
+![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
+![Docker](https://img.shields.io/badge/Docker-Required-blue.svg)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
+![Platform](https://img.shields.io/badge/Linux-Recommended-orange.svg)
+![Rclone](https://img.shields.io/badge/Rclone-Supported-blueviolet.svg)
 
 **Rclone Watch Manager** is a menu-driven operations console for watching local folders and synchronizing them to cloud storage using **Docker**, **rclone**, and Linux **inotify**.
 

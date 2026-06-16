@@ -1,1 +1,2 @@
-# Rclone Watch Manager currently uses the Python standard library only.
+pyyaml
+rich
