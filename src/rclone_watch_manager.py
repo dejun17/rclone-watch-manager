@@ -67,7 +67,7 @@ from typing import Dict, List, Optional, Tuple
 
 APP_NAME = "rclone-watch-manager"
 APP_DISPLAY_NAME = "Rclone Watch Manager"
-APP_VERSION = "1.0.1"
+APP_VERSION = "1.4.0"
 APP_ROOT = Path(os.environ.get("RWM_APP_ROOT", str(Path.home() / f".{APP_NAME}"))).resolve()
 REGISTRY_PATH = APP_ROOT / "registry.json"
 SETTINGS_PATH = APP_ROOT / "settings.json"
@@ -107,11 +107,18 @@ WATCH_DIR="${WATCH_DIR:-/data/to-sync}"
 REMOTE_PATH="${REMOTE_PATH:-Drive:Documents}"
 DEBOUNCE_SECONDS="${DEBOUNCE_SECONDS:-45}"
 SYNC_MODE="${SYNC_MODE:-sync}"
+GOOGLE_DOCS_MODE="${GOOGLE_DOCS_MODE:-skip}"
+FOLLOW_SYMLINKS="${FOLLOW_SYMLINKS:-false}"
 DRY_RUN_ON_START="${DRY_RUN_ON_START:-false}"
 
 # SYNC_MODE:
 #   sync = mirror source to remote, including deletions
 #   copy = upload/update only, never delete remote files
+#
+# GOOGLE_DOCS_MODE:
+#   skip   = ignore Google Docs, Sheets, Slides, and other Google-native files
+#   export = export Google Docs as Office/PDF files where supported
+#   native = do not add Google Docs handling flags
 #
 # DRY_RUN_ON_START:
 #   true = perform a dry-run transfer test before entering watch mode
@@ -122,23 +129,50 @@ echo "[watch] watching: ${WATCH_DIR}"
 echo "[watch] remote:   ${REMOTE_PATH}"
 echo "[watch] debounce: ${DEBOUNCE_SECONDS}s"
 echo "[watch] mode:     ${SYNC_MODE}"
+echo "[watch] google-docs-mode: ${GOOGLE_DOCS_MODE}"
+echo "[watch] follow-symlinks: ${FOLLOW_SYMLINKS}"
 echo "[watch] dry-run-on-start: ${DRY_RUN_ON_START}"
 
 timer_pid=""
 
 run_rclone() {
   local extra_args=("$@")
+  local gdocs_args=()
+  local symlink_args=()
+
+  case "${GOOGLE_DOCS_MODE}" in
+    skip)
+      gdocs_args+=(--drive-skip-gdocs)
+      ;;
+    export)
+      gdocs_args+=(--drive-export-formats docx,xlsx,pptx,pdf)
+      ;;
+    native)
+      ;;
+    *)
+      echo "[watch] WARN: unknown GOOGLE_DOCS_MODE '${GOOGLE_DOCS_MODE}', defaulting to skip"
+      gdocs_args+=(--drive-skip-gdocs)
+      ;;
+  esac
+
+  if [[ "${FOLLOW_SYMLINKS}" == "true" ]]; then
+    symlink_args+=(--copy-links)
+  fi
 
   if [[ "${SYNC_MODE}" == "copy" ]]; then
     rclone copy "${WATCH_DIR}" "${REMOTE_PATH}" \
       --fast-list \
       --log-level INFO \
+      "${gdocs_args[@]}" \
+      "${symlink_args[@]}" \
       "${extra_args[@]}"
   else
     rclone sync "${WATCH_DIR}" "${REMOTE_PATH}" \
       --fast-list \
       --delete-during \
       --log-level INFO \
+      "${gdocs_args[@]}" \
+      "${symlink_args[@]}" \
       "${extra_args[@]}"
   fi
 }
@@ -192,6 +226,34 @@ done
 # Terminal colors / UI helpers
 # =============================================================================
 
+UI_WIDTH = 88
+
+
+def clear_screen() -> None:
+    """Clear the terminal so menus redraw in one place."""
+    if os.environ.get("RWM_NO_CLEAR"):
+        return
+    os.system("cls" if os.name == "nt" else "clear")
+
+
+def divider(char: str = "=") -> str:
+    return char * UI_WIDTH
+
+
+def boxed_lines(title: str, lines: Optional[List[str]] = None) -> None:
+    """Draw a simple boxed terminal panel."""
+    print(c("┌" + "─" * (UI_WIDTH - 2) + "┐", Color.CYAN))
+    print(c("│" + title.center(UI_WIDTH - 2) + "│", Color.BOLD + Color.CYAN))
+    print(c("├" + "─" * (UI_WIDTH - 2) + "┤", Color.CYAN))
+    if lines:
+        for line in lines:
+            clean = str(line)
+            if len(clean) > UI_WIDTH - 4:
+                clean = clean[: UI_WIDTH - 7] + "..."
+            print(c("│ ", Color.CYAN) + clean.ljust(UI_WIDTH - 4) + c(" │", Color.CYAN))
+    print(c("└" + "─" * (UI_WIDTH - 2) + "┘", Color.CYAN))
+
+
 class Color:
     RESET = "\033[0m"
     BOLD = "\033[1m"
@@ -230,9 +292,8 @@ def icon(status: str) -> str:
 
 
 def banner(title: str) -> None:
-    print("\n" + c("=" * 88, Color.CYAN))
-    print(c(title, Color.BOLD + Color.CYAN))
-    print(c("=" * 88, Color.CYAN))
+    clear_screen()
+    boxed_lines(title)
 
 
 def section(title: str) -> None:
@@ -323,6 +384,8 @@ class WatchEntry:
     debounce_seconds: int = DEFAULT_DEBOUNCE_SECONDS
     timezone: str = DEFAULT_TIMEZONE
     sync_mode: str = "copy"
+    google_docs_mode: str = "skip"
+    follow_symlinks: bool = False
     enabled: bool = True
 
     @property
@@ -407,7 +470,7 @@ def ensure_base_layout() -> None:
 
     if not dockerfile_path.exists():
         dockerfile_path.write_text(DOCKERFILE_CONTENT, encoding="utf-8")
-    if not watch_script_path.exists():
+    if not watch_script_path.exists() or watch_script_path.read_text(encoding="utf-8") != WATCH_SH_CONTENT:
         watch_script_path.write_text(WATCH_SH_CONTENT, encoding="utf-8")
         watch_script_path.chmod(0o755)
 
@@ -724,6 +787,8 @@ def compose_yaml_for_entry(entry: WatchEntry, settings: Settings) -> str:
               REMOTE_PATH: {entry.remote_name}:{entry.drive_root_path}
               DEBOUNCE_SECONDS: "{entry.debounce_seconds}"
               SYNC_MODE: {entry.sync_mode}
+              GOOGLE_DOCS_MODE: {entry.google_docs_mode}
+              FOLLOW_SYMLINKS: {"true" if entry.follow_symlinks else "false"}
               DRY_RUN_ON_START: "{dry_run}"
             volumes:
               - {SHARED_RCLONE_CONFIG_DIR}:/config/rclone
@@ -795,6 +860,15 @@ def local_dry_run(entry: WatchEntry) -> bool:
         return False
     command = "copy" if entry.sync_mode == "copy" else "sync"
     cmd = ["rclone", command, entry.local_path, f"{entry.remote_name}:{entry.drive_root_path}", "--dry-run", "--fast-list", "--log-level", "INFO"]
+
+    if entry.google_docs_mode == "skip":
+        cmd.append("--drive-skip-gdocs")
+    elif entry.google_docs_mode == "export":
+        cmd.extend(["--drive-export-formats", "docx,xlsx,pptx,pdf"])
+
+    if entry.follow_symlinks:
+        cmd.append("--copy-links")
+
     if command == "sync":
         cmd.insert(4, "--delete-during")
     banner(f"Dry-run test: {entry.name}")
@@ -899,6 +973,34 @@ def choose_sync_mode(default: str = "copy") -> str:
     return "sync" if raw == "2" else "copy"
 
 
+def choose_google_docs_mode(default: str = "skip") -> str:
+    print(wrap("""
+        Google Docs handling:
+          1) skip    - ignore Google Docs, Sheets, Slides, and other Google-native files  [safest]
+          2) export  - export Google Docs as Office/PDF files where supported
+          3) native  - do not add Google Docs handling flags  [advanced]
+    """))
+    default_map = {"skip": "1", "export": "2", "native": "3"}
+    raw = prompt("Choose Google Docs mode", default=default_map.get(default, "1"))
+
+    if raw == "2":
+        return "export"
+    if raw == "3":
+        return "native"
+    return "skip"
+
+
+def choose_follow_symlinks(default: bool = False) -> bool:
+    print(wrap("""
+        Follow symbolic links:
+
+          1) No  - skip symlinks (recommended)
+          2) Yes - copy symlink targets using --copy-links
+    """))
+    raw = prompt("Follow symlinks", default="2" if default else "1")
+    return raw == "2"
+
+
 def add_watch_folder(entries: List[WatchEntry], settings: Settings) -> List[WatchEntry]:
     banner("Add watched folder")
     while True:
@@ -930,6 +1032,8 @@ def add_watch_folder(entries: List[WatchEntry], settings: Settings) -> List[Watc
     debounce = max(1, prompt_int("Debounce seconds", DEFAULT_DEBOUNCE_SECONDS))
     timezone_value = prompt("Timezone", default=settings.timezone) or settings.timezone
     sync_mode = choose_sync_mode(default=settings.default_sync_mode)
+    google_docs_mode = choose_google_docs_mode(default="skip")
+    follow_symlinks = choose_follow_symlinks(default=False)
 
     entry = WatchEntry(
         name=name,
@@ -939,6 +1043,8 @@ def add_watch_folder(entries: List[WatchEntry], settings: Settings) -> List[Watc
         debounce_seconds=debounce,
         timezone=timezone_value,
         sync_mode=sync_mode,
+        google_docs_mode=google_docs_mode,
+        follow_symlinks=follow_symlinks,
     )
     write_entry_stack(entry, settings)
     entries.append(entry)
@@ -1001,6 +1107,8 @@ def edit_watch_folder(entries: List[WatchEntry], settings: Settings) -> List[Wat
     entry.debounce_seconds = max(1, prompt_int("Debounce seconds", entry.debounce_seconds))
     entry.timezone = prompt("Timezone", default=entry.timezone) or entry.timezone
     entry.sync_mode = choose_sync_mode(default=entry.sync_mode)
+    entry.google_docs_mode = choose_google_docs_mode(default=entry.google_docs_mode)
+    entry.follow_symlinks = choose_follow_symlinks(default=entry.follow_symlinks)
 
     write_entry_stack(entry, settings)
     save_registry(entries)
@@ -1089,7 +1197,7 @@ def show_dashboard(entries: List[WatchEntry], settings: Settings) -> None:
     if not entries:
         print("No watchers configured.")
         return
-    header = f"{'Name':<22} {'Status':<16} {'Mode':<6} {'DryRun':<8} {'Last Transfer'}"
+    header = f"{'Name':<22} {'Status':<16} {'Mode':<6} {'GDocs':<8} {'DryRun':<8} {'Last Transfer'}"
     print(c(header, Color.BOLD))
     print("-" * len(header))
     for entry in entries:
@@ -1098,7 +1206,7 @@ def show_dashboard(entries: List[WatchEntry], settings: Settings) -> None:
         dry = "?" if not rec or rec.dry_run_ok is None else "ok" if rec.dry_run_ok else "fail"
         last = rec.last_transfer_complete if rec and rec.last_transfer_complete else "-"
         status_color = Color.GREEN if status == "running" else Color.YELLOW if status in {"exited", "not-created"} else Color.RED
-        print(f"{entry.name:<22} {c(status, status_color):<25} {entry.sync_mode:<6} {dry:<8} {last}")
+        print(f"{entry.name:<22} {c(status, status_color):<25} {entry.sync_mode:<6} {entry.google_docs_mode:<8} {dry:<8} {last}")
 
 
 def print_watcher_table(entries: List[WatchEntry]) -> None:
@@ -1106,14 +1214,14 @@ def print_watcher_table(entries: List[WatchEntry]) -> None:
     if not entries:
         print("No watchers configured.")
         return
-    header = f"{'#':<4} {'Name':<22} {'Status':<16} {'Mode':<6} {'Remote'}"
+    header = f"{'#':<4} {'Name':<22} {'Status':<16} {'Mode':<6} {'GDocs':<8} {'Remote'}"
     print(c(header, Color.BOLD))
     print("-" * len(header))
     for idx, entry in enumerate(entries, start=1):
         status = container_status(entry)
         destination = f"{entry.remote_name}:{entry.drive_root_path}"
         color = Color.GREEN if status == "running" else Color.YELLOW if status in {"exited", "not-created"} else Color.RED
-        print(f"{idx:<4} {entry.name:<22} {c(status, color):<25} {entry.sync_mode:<6} {destination}")
+        print(f"{idx:<4} {entry.name:<22} {c(status, color):<25} {entry.sync_mode:<6} {entry.google_docs_mode:<8} {destination}")
 
 
 def show_logs(entry: WatchEntry, settings: Settings) -> None:
@@ -1342,13 +1450,13 @@ def restore_backup() -> None:
 
 def backup_restore_menu() -> None:
     while True:
-        banner("Backup / export / restore")
-        print(wrap("""
+        clear_screen()
+        menu_panel("Backup / export / restore", """
             1) Create backup/export
             2) Restore/import backup
             3) List backups
             0) Back
-        """))
+        """)
         choice = prompt("Choose")
         if choice == "0":
             return
@@ -1414,12 +1522,12 @@ def generate_systemd_units(entries: List[WatchEntry]) -> None:
 
 def systemd_menu(entries: List[WatchEntry]) -> None:
     while True:
-        banner("systemd wrapper")
-        print(wrap("""
+        clear_screen()
+        menu_panel("systemd wrapper", """
             1) Generate systemd unit files for all watchers
             2) Show install instructions
             0) Back
-        """))
+        """)
         choice = prompt("Choose")
         if choice == "0":
             return
@@ -1492,9 +1600,128 @@ def run_first_run_wizard(settings: Settings) -> Settings:
     return settings
 
 
+
+def watchers_menu(entries, settings):
+    while True:
+        clear_screen()
+        menu_panel("Watchers", """
+            1) List watchers
+            2) Add watcher
+            3) Edit watcher
+            4) Remove watcher
+            0) Back
+        """)
+        choice = prompt("Choose")
+        if choice == "0":
+            return
+        elif choice == "1":
+            print_watcher_table(entries); pause()
+        elif choice == "2":
+            entries[:] = add_watch_folder(entries, settings); save_registry(entries); pause()
+        elif choice == "3":
+            entries[:] = edit_watch_folder(entries, settings); save_registry(entries); pause()
+        elif choice == "4":
+            entries[:] = remove_watch_folder(entries); save_registry(entries); pause()
+
+def monitoring_menu(entries, settings):
+    while True:
+        clear_screen()
+        menu_panel("Monitoring", """
+            1) Health dashboard
+            2) Status / Start / Stop / Logs
+            3) Startup validation
+            0) Back
+        """)
+        c1 = prompt("Choose")
+        if c1 == "0": return
+        elif c1 == "1": show_dashboard(entries, settings); pause()
+        elif c1 == "2": status_control_menu(entries, settings)
+        elif c1 == "3": show_startup_validation(settings); pause()
+
+def configuration_menu(settings):
+    while True:
+        clear_screen()
+        menu_panel("Configuration", """
+            1) Install Docker
+            2) Install rclone
+            3) Configure rclone
+            4) Remote test / check
+            5) Build watcher image
+            6) Settings editor
+            7) First-run wizard
+            0) Back
+        """)
+        c1 = prompt("Choose")
+        if c1 == "0": return settings
+        elif c1 == "1": install_docker(); pause()
+        elif c1 == "2": install_rclone(); pause()
+        elif c1 == "3": setup_rclone_configuration(settings); pause()
+        elif c1 == "4": remote_check_menu(settings); pause()
+        elif c1 == "5": build_base_image_if_needed(force=True); pause()
+        elif c1 == "6": settings = settings_editor(settings); save_settings(settings); pause()
+        elif c1 == "7": settings = run_first_run_wizard(settings); save_settings(settings); pause()
+    return settings
+
+def maintenance_menu(entries):
+    while True:
+        clear_screen()
+        menu_panel("Maintenance", """
+            1) Backup / Restore
+            2) Generate systemd units
+            0) Back
+        """)
+        c1 = prompt("Choose")
+        if c1 == "0": return
+        elif c1 == "1": backup_restore_menu()
+        elif c1 == "2": systemd_menu(entries)
+
+
+
+def render_main_header(entries: List[WatchEntry]) -> None:
+    running = sum(1 for e in entries if container_status(e) == "running")
+    lines = [
+        f"Watchers: {len(entries)}",
+        f"Running:  {running}",
+        f"Docker:   {'Ready' if docker_ready() else 'Not Ready'}",
+        f"rclone:   {'Configured' if rclone_configured() else 'Not Configured'}",
+        f"Image:    {'Present' if shared_image_exists() else 'Missing'}",
+    ]
+    boxed_lines(f"{APP_DISPLAY_NAME} v{APP_VERSION}", lines)
+
+
+def menu_panel(title: str, options: str) -> None:
+    boxed_lines(title, [line.rstrip() for line in wrap(options).splitlines() if line.strip()])
+
+
+def help_menu():
+    while True:
+        clear_screen()
+        menu_panel("Help", """
+            1) About
+            2) Paths and Storage Locations
+            3) Troubleshooting Tips
+            0) Back
+        """)
+        c1 = prompt("Choose")
+        if c1 == "0":
+            return
+        elif c1 == "1":
+            print(f"{APP_DISPLAY_NAME} v{APP_VERSION}")
+            print("Docker-powered rclone watcher management console.")
+            pause()
+        elif c1 == "2":
+            print(f"App Root: {APP_ROOT}")
+            print(f"Stacks: {STACKS_DIR}")
+            print(f"Backups: {BACKUP_DIR}")
+            pause()
+        elif c1 == "3":
+            print("Check Docker, rclone config, image build, and watcher logs.")
+            pause()
+
 # =============================================================================
 # Main menu
 # =============================================================================
+
 
 def main_menu() -> None:
     ensure_base_layout()
@@ -1508,84 +1735,37 @@ def main_menu() -> None:
     while True:
         settings = load_settings()
         entries = load_registry()
-        banner(f"{APP_DISPLAY_NAME} v{APP_VERSION}")
-        print(wrap("""
-             1) Health dashboard
-             2) Install Docker
-             3) Install rclone
-             4) Run rclone configuration setup
-             5) Remote test / check menu
-             6) Folder list / statuses / start / stop / logs
-             7) Add a folder to watch
-             8) Edit a folder entry
-             9) Remove a folder from the list
-            10) Build or rebuild shared watcher image
-            11) Settings editor
-            12) Backup / export / restore
-            13) systemd wrapper generator
-            14) Startup validation
-            15) Re-run first-run setup wizard
-             0) Exit
-        """))
+
+        clear_screen()
+        render_main_header(entries)
+        print()
+        menu_panel("Main Menu", """
+            1) Watchers
+            2) Monitoring
+            3) Configuration
+            4) Maintenance
+            5) Help
+            0) Exit
+        """)
+
         choice = prompt("Choose an option")
 
         if choice == "0":
             print("Goodbye.")
             return
-        if choice == "1":
-            show_dashboard(entries, settings)
-            pause()
+        elif choice == "1":
+            watchers_menu(entries, settings)
         elif choice == "2":
-            install_docker()
-            pause()
+            monitoring_menu(entries, settings)
         elif choice == "3":
-            install_rclone()
-            pause()
+            settings = configuration_menu(settings) or settings
         elif choice == "4":
-            setup_rclone_configuration(settings)
-            pause()
+            maintenance_menu(entries)
         elif choice == "5":
-            remote_check_menu(settings)
-            pause()
-        elif choice == "6":
-            status_control_menu(entries, settings)
-            pause()
-        elif choice == "7":
-            entries = add_watch_folder(entries, settings)
-            save_registry(entries)
-            pause()
-        elif choice == "8":
-            entries = edit_watch_folder(entries, settings)
-            save_registry(entries)
-            pause()
-        elif choice == "9":
-            entries = remove_watch_folder(entries)
-            save_registry(entries)
-            pause()
-        elif choice == "10":
-            build_base_image_if_needed(force=True)
-            pause()
-        elif choice == "11":
-            settings = settings_editor(settings)
-            save_settings(settings)
-            pause()
-        elif choice == "12":
-            backup_restore_menu()
-            pause()
-        elif choice == "13":
-            systemd_menu(entries)
-            pause()
-        elif choice == "14":
-            show_startup_validation(settings)
-            pause()
-        elif choice == "15":
-            settings = run_first_run_wizard(settings)
-            save_settings(settings)
-            pause()
+            help_menu()
         else:
             warn("Unknown option.")
             pause()
-
 
 # =============================================================================
 # Entrypoint
