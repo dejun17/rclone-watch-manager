@@ -1,0 +1,15 @@
+services:
+  rclone-watch-documents:
+    image: rclone-watch-manager:latest
+    container_name: rclone-watch-documents
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      WATCH_DIR: /data/to-sync
+      REMOTE_PATH: Drive:Backups/Documents
+      DEBOUNCE_SECONDS: "45"
+      SYNC_MODE: copy
+      DRY_RUN_ON_START: "true"
+    volumes:
+      - ~/.rclone-watch-manager/rclone-config:/config/rclone
+      - /home/user/Documents:/data/to-sync

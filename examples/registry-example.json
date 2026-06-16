@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "name": "documents",
+      "local_path": "/home/user/Documents",
+      "drive_root_path": "Backups/Documents",
+      "remote_name": "Drive",
+      "debounce_seconds": 45,
+      "timezone": "UTC",
+      "sync_mode": "copy",
+      "enabled": true
+    }
+  ]
+}

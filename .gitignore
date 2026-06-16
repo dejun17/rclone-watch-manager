@@ -1,8 +1,31 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# App data / secrets
 .rclone-watch-manager/
+rclone.conf
+registry.json
+settings.json
+status-cache.json
+
+# Generated runtime data
 backups/
 logs/
 stacks/
 systemd/
-rclone.conf
+*.tar.gz
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Temp
+tmp/
+temp/

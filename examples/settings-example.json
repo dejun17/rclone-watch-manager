@@ -1,0 +1,10 @@
+{
+  "timezone": "UTC",
+  "remote_name": "Drive",
+  "log_tail_lines": 150,
+  "first_run_complete": false,
+  "dry_run_before_start": true,
+  "default_sync_mode": "copy",
+  "color_enabled": true,
+  "systemd_user_mode": false
+}

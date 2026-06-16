@@ -45,6 +45,7 @@ filesystem changes actually occur.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import platform
@@ -66,7 +67,7 @@ from typing import Dict, List, Optional, Tuple
 
 APP_NAME = "rclone-watch-manager"
 APP_DISPLAY_NAME = "Rclone Watch Manager"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.0.1"
 APP_ROOT = Path(os.environ.get("RWM_APP_ROOT", str(Path.home() / f".{APP_NAME}"))).resolve()
 REGISTRY_PATH = APP_ROOT / "registry.json"
 SETTINGS_PATH = APP_ROOT / "settings.json"
@@ -1265,7 +1266,7 @@ def safe_extract_tar(tar: tarfile.TarFile, path: Path) -> None:
 
     for member in tar.getmembers():
         member_path = (destination / member.name).resolve()
-        if not str(member_path).startswith(str(destination)):
+        if destination != member_path and destination not in member_path.parents:
             raise ValueError(f"Unsafe path detected in archive: {member.name}")
 
     tar.extractall(destination)
@@ -1591,7 +1592,34 @@ def main_menu() -> None:
 # =============================================================================
 
 def main() -> int:
+    parser = argparse.ArgumentParser(
+        prog=APP_NAME,
+        description=f"{APP_DISPLAY_NAME} - manage Docker-powered rclone folder watchers.",
+    )
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Print the application version and exit.",
+    )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Run startup validation and exit without opening the menu.",
+    )
+    args = parser.parse_args()
+
+    if args.version:
+        print(f"{APP_DISPLAY_NAME} v{APP_VERSION}")
+        return 0
+
     try:
+        ensure_base_layout()
+        settings = load_settings()
+
+        if args.validate:
+            show_startup_validation(settings)
+            return 0
+
         main_menu()
         return 0
     except KeyboardInterrupt:
